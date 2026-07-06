@@ -1,0 +1,167 @@
+==============================================================================
+sql/01_data_quality_checks.sql
+==============================================================================
+
+--- SELECT 'delivery_stations' AS table_name, COUNT(*) AS rows FROM delivery_station ...
+table_name | rows
+delivery_stations | 6
+drivers | 339
+routes | 1385
+packages | 287635
+delivery_attempts | 308361
+
+--- SELECT COUNT(*) AS orphan_packages FROM packages p LEFT JOIN routes r ON r.route ...
+orphan_packages
+0
+
+--- SELECT COUNT(*) AS packages_without_attempts FROM packages p LEFT JOIN delivery_ ...
+packages_without_attempts
+0
+
+--- SELECT SUM(CASE WHEN status = 'delivered' AND failure_reason IS NOT NULL THEN 1  ...
+delivered_with_reason | failed_without_reason
+0 | 0
+
+--- SELECT package_id, attempt_number, COUNT(*) AS n FROM delivery_attempts GROUP BY ...
+package_id | attempt_number | n
+
+==============================================================================
+sql/02_network_kpis.sql
+==============================================================================
+
+--- SELECT COUNT(*) AS first_attempts, ROUND(AVG(CASE WHEN status = 'delivered' THEN ...
+first_attempts | first_attempt_success_pct
+287635 | 92.79
+
+--- WITH final_delivery AS ( SELECT package_id, MIN(DATE(attempt_time)) AS delivered ...
+delivered_packages | on_time_pct
+285470 | 93.5
+
+--- SELECT strftime('%Y-%W', r.route_date) AS year_week, COUNT(p.package_id) AS pack ...
+year_week | packages
+2026-13 | 19657
+2026-14 | 20787
+2026-15 | 21391
+2026-16 | 22659
+2026-17 | 23211
+2026-18 | 24202
+2026-19 | 24220
+2026-20 | 25773
+2026-21 | 25526
+2026-22 | 25595
+2026-23 | 27014
+2026-24 | 27600
+
+--- WITH outcomes AS ( SELECT package_id, MAX(CASE WHEN status = 'delivered' THEN 1  ...
+total_packages | undelivered | undelivered_pct
+287635 | 2165 | 0.75
+
+==============================================================================
+sql/03_station_performance.sql
+==============================================================================
+
+--- WITH pkg_stats AS ( SELECT r.station_id, COUNT(*) AS packages, ROUND(AVG(CASE WH ...
+station_code | city | zone_type | packages | first_attempt_success_pct | avg_stops_per_route | avg_route_overrun_pct
+BER-4 | Berlin | urban | 60439 | 90.02 | 197.0 | 14.0
+HAM-2 | Hamburg | urban | 49123 | 92.81 | 178.0 | 10.6
+BER-1 | Berlin | urban | 56986 | 93.04 | 177.0 | 10.0
+CGN-3 | Cologne | suburban | 39702 | 93.97 | 177.0 | 10.0
+MUC-1 | Munich | suburban | 51908 | 94.1 | 177.0 | 10.0
+LEJ-1 | Leipzig | rural | 29477 | 94.1 | 178.0 | 10.2
+
+--- WITH daily_volume AS ( SELECT r.station_id, r.route_date, COUNT(p.package_id) AS ...
+station_code | daily_capacity | avg_daily_pkgs | avg_utilization_pct | peak_utilization_pct
+BER-4 | 700 | 839.0 | 119.9 | 180.6
+BER-1 | 900 | 791.0 | 87.9 | 132.8
+HAM-2 | 800 | 682.0 | 85.3 | 114.6
+CGN-3 | 650 | 551.0 | 84.8 | 109.5
+MUC-1 | 850 | 721.0 | 84.8 | 110.0
+LEJ-1 | 500 | 409.0 | 81.9 | 100.8
+
+==============================================================================
+sql/04_failure_analysis.sql
+==============================================================================
+
+--- SELECT failure_reason, COUNT(*) AS failures, ROUND(COUNT(*) * 100.0 / SUM(COUNT( ...
+failure_reason | failures | pct_of_failures
+customer_not_home | 9717 | 46.9
+access_problem | 4856 | 23.4
+address_issue | 2750 | 13.3
+out_of_time | 2389 | 11.5
+package_damaged | 1014 | 4.9
+
+--- SELECT s.zone_type, COUNT(*) AS total_failures, SUM(CASE WHEN a.failure_reason = ...
+zone_type | total_failures | not_home | access_problem | address_issue | out_of_time | damaged
+urban | 13528 | 6117 | 4101 | 1322 | 1320 | 668
+suburban | 5458 | 2722 | 581 | 1098 | 801 | 256
+rural | 1740 | 878 | 174 | 330 | 268 | 90
+
+--- SELECT CASE strftime('%w', attempt_time) WHEN '1' THEN 'Mon' WHEN '2' THEN 'Tue' ...
+weekday | first_attempts | failure_rate_pct
+Mon | 47876 | 7.5
+Tue | 48063 | 7.26
+Wed | 49447 | 7.51
+Thu | 46912 | 7.21
+Fri | 48206 | 7.47
+Sat | 47131 | 6.25
+
+--- SELECT s.station_code, COUNT(*) AS second_attempts, ROUND(COUNT(*) * 2.50, 0) AS ...
+station_code | second_attempts | est_reattempt_cost_eur
+BER-4 | 6032 | 15080.0
+BER-1 | 3965 | 9913.0
+HAM-2 | 3531 | 8828.0
+MUC-1 | 3064 | 7660.0
+CGN-3 | 2394 | 5985.0
+LEJ-1 | 1740 | 4350.0
+
+==============================================================================
+sql/05_driver_tenure_analysis.sql
+==============================================================================
+
+--- WITH attempt_with_tenure AS ( SELECT a.status, julianday(r.route_date) - juliand ...
+tenure_bucket | first_attempts | success_pct
+1: rookie (<90d) | 16779 | 90.7
+2: developing (90-365d) | 96959 | 92.8
+3: experienced (>1y) | 173897 | 92.99
+
+--- WITH driver_perf AS ( SELECT r.station_id, d.driver_name, COUNT(*) AS attempts,  ...
+station_code | cohort | driver_name | attempts | success_pct
+BER-1 | top 5 | Ines Silva | 641 | 95.48
+BER-1 | top 5 | Gina Keller | 1354 | 94.9
+BER-1 | top 5 | David Peters | 586 | 94.54
+BER-1 | top 5 | Wim Ali | 1471 | 94.43
+BER-1 | top 5 | Hakan Keller | 980 | 94.39
+BER-1 | bottom 5 | Umut Hoffmann | 651 | 91.71
+BER-1 | bottom 5 | Ines Weber | 1062 | 91.71
+BER-1 | bottom 5 | Ben Braun | 1241 | 91.3
+BER-1 | bottom 5 | Gina Braun | 757 | 91.15
+BER-1 | bottom 5 | Rosa Wagner | 664 | 90.36
+BER-4 | top 5 | Paula Hoffmann | 891 | 92.26
+BER-4 | top 5 | Katja Yilmaz | 1067 | 91.85
+BER-4 | top 5 | Tara Fischer | 693 | 91.63
+BER-4 | top 5 | Elif Fischer | 1483 | 91.5
+BER-4 | top 5 | Omar Yilmaz | 911 | 91.44
+... (61 rows total)
+
+==============================================================================
+sql/06_capacity_planning.sql
+==============================================================================
+
+--- WITH weekly AS ( SELECT r.station_id, strftime('%Y-%W', r.route_date) AS year_we ...
+station_code | avg_wow_growth_pct
+BER-4 | 4.94
+CGN-3 | 4.21
+MUC-1 | 3.68
+BER-1 | 3.02
+HAM-2 | 2.24
+LEJ-1 | 1.53
+
+--- WITH daily AS ( SELECT r.station_id, r.route_date, COUNT(p.package_id) AS pkgs F ...
+station_code | daily_capacity | current_avg_daily | current_utilization_pct | avg_weekly_growth_pct | weeks_until_capacity
+BER-1 | 900 | 919.0 | 102.1 | 3.02 | 0
+BER-4 | 700 | 1007.0 | 143.8 | 4.94 | 0
+MUC-1 | 850 | 843.0 | 99.2 | 3.68 | 0
+HAM-2 | 800 | 777.0 | 97.1 | 2.24 | 1
+CGN-3 | 650 | 603.0 | 92.7 | 4.21 | 1
+LEJ-1 | 500 | 451.0 | 90.3 | 1.53 | 6
+
