@@ -22,8 +22,9 @@ instead of following a generic tutorial, I built a dataset that mirrors the
 operational world I know: stations, delivery windows, package flow.
 
 The project was scaffolded with AI assistance (Claude) as a learning tool —
-the schema and dataset were generated to give me a realistic sandbox, and I
-work through every query myself following a structured study plan
+the schema and dataset were generated to give me a realistic sandbox. The
+analysis questions come from my own operational experience, and I write and
+run every query myself, following a structured study plan
 (see STUDY_WALKTHROUGH).
 
 ## Tools
