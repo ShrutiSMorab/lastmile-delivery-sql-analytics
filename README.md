@@ -30,3 +30,5 @@ run every query myself, following a structured study plan
 ## Tools
 
 SQLite (sqlite3 on macOS Terminal), DB Browser for SQLite
+
+**Note**: the SQLite database (~32 MB) is not stored in this repo — run `python3 generate_data.py` to rebuild it locally (seeded, fully reproducible).
