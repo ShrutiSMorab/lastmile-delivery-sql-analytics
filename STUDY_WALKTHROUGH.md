@@ -1,10 +1,3 @@
-# Study walkthrough — learn this project in 4 evenings
-
-**Purpose (for you, Shruti — delete this file before publishing, or keep a
-private copy):** if this repo is on your CV, an Amazon interviewer may ask you
-to open any file and explain any line. This walkthrough gets you there. Each
-evening is ~60–90 minutes. Practice in Terminal (`sqlite3` is preinstalled on
-your Mac) or at sqliteonline.com.
 
 ---
 
