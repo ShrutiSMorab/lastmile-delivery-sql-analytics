@@ -1,167 +1,70 @@
-==============================================================================
-sql/01_data_quality_checks.sql
-==============================================================================
+# Last-Mile Delivery Network Analytics
 
---- SELECT 'delivery_stations' AS table_name, COUNT(*) AS rows FROM delivery_station ...
-table_name | rows
-delivery_stations | 6
-drivers | 339
-routes | 1385
-packages | 287635
-delivery_attempts | 308361
+A SQLite case study on a six-station delivery network: 287,635 packages, 308,361 delivery attempts, 339 drivers, over roughly twelve weeks. I built it to answer the operational questions I deal with day to day in Amazon Logistics, using SQL rather than spreadsheets.
 
---- SELECT COUNT(*) AS orphan_packages FROM packages p LEFT JOIN routes r ON r.route ...
-orphan_packages
-0
+## What the analysis showed
 
---- SELECT COUNT(*) AS packages_without_attempts FROM packages p LEFT JOIN delivery_ ...
-packages_without_attempts
-0
+**The network is running out of room.** Five of six stations sit above 90% utilisation, and three are already over capacity on average daily volume. At current growth rates, only one station has more than a week of headroom left.
 
---- SELECT SUM(CASE WHEN status = 'delivered' AND failure_reason IS NOT NULL THEN 1  ...
-delivered_with_reason | failed_without_reason
-0 | 0
+| Station | Daily capacity | Current daily average | Utilisation | Weeks until capacity |
+|---|---|---|---|---|
+| BER-4 | 700 | 1,007 | 143.8% | 0 |
+| BER-1 | 900 | 919 | 102.1% | 0 |
+| MUC-1 | 850 | 843 | 99.2% | 0 |
+| HAM-2 | 800 | 777 | 97.1% | 1 |
+| CGN-3 | 650 | 603 | 92.7% | 1 |
+| LEJ-1 | 500 | 451 | 90.3% | 6 |
 
---- SELECT package_id, attempt_number, COUNT(*) AS n FROM delivery_attempts GROUP BY ...
-package_id | attempt_number | n
+**BER-4 is the problem, and it is the problem on every measure.** It carries the most volume against the smallest capacity, and it is also the fastest growing station at 4.94% week on week. It has the worst first-attempt success rate at 90.0%, the highest route overrun at 14%, and the highest reattempt cost at roughly €15,080 across the period.
 
-==============================================================================
-sql/02_network_kpis.sql
-==============================================================================
+**Overloaded stations deliver worse.** Ranking stations by utilisation produces almost the same order as ranking them by first-attempt failure. BER-4 at 143.8% utilisation delivers 90.0% first time. LEJ-1 at 90.3% delivers 94.1%. The gap is small in percentage terms but it runs across the whole network in the same direction, which suggests the performance problem is a capacity problem wearing a different hat.
 
---- SELECT COUNT(*) AS first_attempts, ROUND(AVG(CASE WHEN status = 'delivered' THEN ...
-first_attempts | first_attempt_success_pct
-287635 | 92.79
+**Most failures are not the driver's fault.** Customer not home accounts for 46.9% of failed attempts and access problems for another 23.4%. Together that is 70% of all failures, and neither is fixed by driver training. Access problems are concentrated in urban zones, which take 84% of them despite carrying well under half the network's stations.
 
---- WITH final_delivery AS ( SELECT package_id, MIN(DATE(attempt_time)) AS delivered ...
-delivered_packages | on_time_pct
-285470 | 93.5
+**Driver tenure barely moves the number.** Rookies under 90 days deliver 90.7% first time. Drivers with over a year deliver 92.99%. A 2.3 point gap across the whole tenure curve is real but small, and it reinforces the point above: this network's constraint is structural, not individual.
 
---- SELECT strftime('%Y-%W', r.route_date) AS year_week, COUNT(p.package_id) AS pack ...
-year_week | packages
-2026-13 | 19657
-2026-14 | 20787
-2026-15 | 21391
-2026-16 | 22659
-2026-17 | 23211
-2026-18 | 24202
-2026-19 | 24220
-2026-20 | 25773
-2026-21 | 25526
-2026-22 | 25595
-2026-23 | 27014
-2026-24 | 27600
+**Saturday is the best delivery day.** Failure rate drops to 6.25% against 7.2% to 7.5% on weekdays, which is consistent with the not-home finding since more people are in.
 
---- WITH outcomes AS ( SELECT package_id, MAX(CASE WHEN status = 'delivered' THEN 1  ...
-total_packages | undelivered | undelivered_pct
-287635 | 2165 | 0.75
+## What I would do with this
 
-==============================================================================
-sql/03_station_performance.sql
-==============================================================================
+If I were presenting this to an operations lead, the recommendation would not be a driver performance programme. It would be capacity at BER-4 first, since it is simultaneously the most overloaded, the worst performing and the fastest growing, and then delivery window or access interventions aimed at the 70% of failures that are customer-side rather than driver-side.
 
---- WITH pkg_stats AS ( SELECT r.station_id, COUNT(*) AS packages, ROUND(AVG(CASE WH ...
-station_code | city | zone_type | packages | first_attempt_success_pct | avg_stops_per_route | avg_route_overrun_pct
-BER-4 | Berlin | urban | 60439 | 90.02 | 197.0 | 14.0
-HAM-2 | Hamburg | urban | 49123 | 92.81 | 178.0 | 10.6
-BER-1 | Berlin | urban | 56986 | 93.04 | 177.0 | 10.0
-CGN-3 | Cologne | suburban | 39702 | 93.97 | 177.0 | 10.0
-MUC-1 | Munich | suburban | 51908 | 94.1 | 177.0 | 10.0
-LEJ-1 | Leipzig | rural | 29477 | 94.1 | 178.0 | 10.2
+Reattempts across the network cost roughly €51,800 over the period at an assumed €2.50 per attempt. BER-4 alone is 29% of that.
 
---- WITH daily_volume AS ( SELECT r.station_id, r.route_date, COUNT(p.package_id) AS ...
-station_code | daily_capacity | avg_daily_pkgs | avg_utilization_pct | peak_utilization_pct
-BER-4 | 700 | 839.0 | 119.9 | 180.6
-BER-1 | 900 | 791.0 | 87.9 | 132.8
-HAM-2 | 800 | 682.0 | 85.3 | 114.6
-CGN-3 | 650 | 551.0 | 84.8 | 109.5
-MUC-1 | 850 | 721.0 | 84.8 | 110.0
-LEJ-1 | 500 | 409.0 | 81.9 | 100.8
+## What is in the repo
 
-==============================================================================
-sql/04_failure_analysis.sql
-==============================================================================
+| File | Contents |
+|---|---|
+| `00_schema.sql` | Five table schema: stations, drivers, routes, packages, delivery attempts |
+| `01_data_quality_checks.sql` | Orphan records, referential integrity, contradictory status flags |
+| `02_network_kpis.sql` | First-attempt success, on-time rate, weekly volume, undelivered share |
+| `03_station_performance.sql` | Station comparison, stops per route, route overrun, utilisation |
+| `04_failure_analysis.sql` | Failure reasons, zone breakdown, weekday pattern, reattempt cost |
+| `05_driver_tenure_analysis.sql` | Success by tenure bucket, top and bottom performers per station |
+| `06_capacity_planning.sql` | Week on week growth and weeks until each station hits capacity |
+| `query_outputs.txt` | Actual output from every query, so results can be checked against the SQL |
+| `STUDY_WALKTHROUGH.md` | The structured plan I followed working through the queries |
 
---- SELECT failure_reason, COUNT(*) AS failures, ROUND(COUNT(*) * 100.0 / SUM(COUNT( ...
-failure_reason | failures | pct_of_failures
-customer_not_home | 9717 | 46.9
-access_problem | 4856 | 23.4
-address_issue | 2750 | 13.3
-out_of_time | 2389 | 11.5
-package_damaged | 1014 | 4.9
+The queries progress from basic aggregation to joins, CTEs and window functions.
 
---- SELECT s.zone_type, COUNT(*) AS total_failures, SUM(CASE WHEN a.failure_reason = ...
-zone_type | total_failures | not_home | access_problem | address_issue | out_of_time | damaged
-urban | 13528 | 6117 | 4101 | 1322 | 1320 | 668
-suburban | 5458 | 2722 | 581 | 1098 | 801 | 256
-rural | 1740 | 878 | 174 | 330 | 268 | 90
+## How it was built
 
---- SELECT CASE strftime('%w', attempt_time) WHEN '1' THEN 'Mon' WHEN '2' THEN 'Tue' ...
-weekday | first_attempts | failure_rate_pct
-Mon | 47876 | 7.5
-Tue | 48063 | 7.26
-Wed | 49447 | 7.51
-Thu | 46912 | 7.21
-Fri | 48206 | 7.47
-Sat | 47131 | 6.25
+The dataset is synthetic. I generated it with AI assistance so I would have a realistic sandbox to work in, and I designed the schema and the business questions around the operational world I already know: stations, delivery windows, route capacity, package flow. I write and run the queries myself.
 
---- SELECT s.station_code, COUNT(*) AS second_attempts, ROUND(COUNT(*) * 2.50, 0) AS ...
-station_code | second_attempts | est_reattempt_cost_eur
-BER-4 | 6032 | 15080.0
-BER-1 | 3965 | 9913.0
-HAM-2 | 3531 | 8828.0
-MUC-1 | 3064 | 7660.0
-CGN-3 | 2394 | 5985.0
-LEJ-1 | 1740 | 4350.0
+Tools: SQLite via `sqlite3` on macOS Terminal, and DB Browser for SQLite.
 
-==============================================================================
-sql/05_driver_tenure_analysis.sql
-==============================================================================
+## Limitations
 
---- WITH attempt_with_tenure AS ( SELECT a.status, julianday(r.route_date) - juliand ...
-tenure_bucket | first_attempts | success_pct
-1: rookie (<90d) | 16779 | 90.7
-2: developing (90-365d) | 96959 | 92.8
-3: experienced (>1y) | 173897 | 92.99
+- The data is generated, not real. The patterns in it are ones I built in, so the findings demonstrate analytical method rather than discovery.
+- The €2.50 reattempt cost is an assumption I applied, not a figure from the data.
+- Twelve weeks is a short window for the growth projections in `06`. I would want a full year before trusting weeks-until-capacity as a planning number.
+- No cost or revenue data, so none of this speaks to profitability per route.
 
---- WITH driver_perf AS ( SELECT r.station_id, d.driver_name, COUNT(*) AS attempts,  ...
-station_code | cohort | driver_name | attempts | success_pct
-BER-1 | top 5 | Ines Silva | 641 | 95.48
-BER-1 | top 5 | Gina Keller | 1354 | 94.9
-BER-1 | top 5 | David Peters | 586 | 94.54
-BER-1 | top 5 | Wim Ali | 1471 | 94.43
-BER-1 | top 5 | Hakan Keller | 980 | 94.39
-BER-1 | bottom 5 | Umut Hoffmann | 651 | 91.71
-BER-1 | bottom 5 | Ines Weber | 1062 | 91.71
-BER-1 | bottom 5 | Ben Braun | 1241 | 91.3
-BER-1 | bottom 5 | Gina Braun | 757 | 91.15
-BER-1 | bottom 5 | Rosa Wagner | 664 | 90.36
-BER-4 | top 5 | Paula Hoffmann | 891 | 92.26
-BER-4 | top 5 | Katja Yilmaz | 1067 | 91.85
-BER-4 | top 5 | Tara Fischer | 693 | 91.63
-BER-4 | top 5 | Elif Fischer | 1483 | 91.5
-BER-4 | top 5 | Omar Yilmaz | 911 | 91.44
-... (61 rows total)
+## Run it yourself
 
-==============================================================================
-sql/06_capacity_planning.sql
-==============================================================================
+```bash
+sqlite3 lastmile.db < 00_schema.sql
+sqlite3 lastmile.db < 02_network_kpis.sql
+```
 
---- WITH weekly AS ( SELECT r.station_id, strftime('%Y-%W', r.route_date) AS year_we ...
-station_code | avg_wow_growth_pct
-BER-4 | 4.94
-CGN-3 | 4.21
-MUC-1 | 3.68
-BER-1 | 3.02
-HAM-2 | 2.24
-LEJ-1 | 1.53
-
---- WITH daily AS ( SELECT r.station_id, r.route_date, COUNT(p.package_id) AS pkgs F ...
-station_code | daily_capacity | current_avg_daily | current_utilization_pct | avg_weekly_growth_pct | weeks_until_capacity
-BER-1 | 900 | 919.0 | 102.1 | 3.02 | 0
-BER-4 | 700 | 1007.0 | 143.8 | 4.94 | 0
-MUC-1 | 850 | 843.0 | 99.2 | 3.68 | 0
-HAM-2 | 800 | 777.0 | 97.1 | 2.24 | 1
-CGN-3 | 650 | 603.0 | 92.7 | 4.21 | 1
-LEJ-1 | 500 | 451.0 | 90.3 | 1.53 | 6
-
+Shruti Morab. [LinkedIn](https://linkedin.com/in/shruti-morab) · [GitHub](https://github.com/ShrutiSMorab)
