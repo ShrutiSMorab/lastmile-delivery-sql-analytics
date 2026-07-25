@@ -1,164 +1,161 @@
 """
-Synthetic data generator for the Last-Mile Delivery Network Analytics project.
+Synthetic data generator for the Indirect Procurement Spend Analytics project.
 
-Creates deliveries.db (SQLite) with 5 related tables that mimic the kind of
-operational data a last-mile logistics network produces:
+Creates spend.db (SQLite): 24 months of purchase-order lines for a mid-size
+company buying indirect goods & services across 4 business units.
 
-    delivery_stations   - the physical sites (like AMZL delivery stations)
-    drivers             - delivery associates assigned to a home station
-    routes              - one route = one driver + one van + one day
-    packages            - individual shipments assigned to routes
-    delivery_attempts   - every attempt made on a package (success or failure)
+All data is SYNTHETIC. Patterns deliberately baked in, so the SQL finds
+real signal:
+  * Pareto concentration: a handful of suppliers carry most of the spend
+  * Price variance: identical items bought at different unit prices
+    across suppliers and business units
+  * Maverick spend: ~12% of spend in contracted categories is placed with
+    non-contracted suppliers, at systematically higher prices
+  * Tail spend: Marketing, MRO and Office Supplies carry many tiny,
+    one-off suppliers (consolidation opportunity)
+  * Mild spend growth plus a Q4 year-end spike
 
-The data is SYNTHETIC (randomly generated with realistic patterns baked in),
-so there is no confidential information anywhere in this project.
-
-Deliberate patterns hidden in the data (so the SQL analysis finds real signal):
-    * Station BER-4 is over capacity -> more failed deliveries, longer routes
-    * Failure reasons cluster: "customer_not_home" spikes on weekdays,
-      "access_problem" is concentrated in dense urban zip zones
-    * Newer drivers (< 90 days tenure) have lower first-attempt success
-    * Package volume grows ~2% week over week (network growth trend)
-
-Run:  python3 generate_data.py     -> writes deliveries.db in this folder
+Run:  python3 generate_data.py   -> writes spend.db in this folder
 """
 
 import random
 import sqlite3
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
-random.seed(42)  # reproducible
+random.seed(7)
+DB = "spend.db"
 
-DB_PATH = "deliveries.db"
+BUS = [(1, "Central Functions", "Berlin"), (2, "Operations North", "Hamburg"),
+       (3, "Operations South", "Munich"), (4, "Digital & Tech", "Berlin")]
 
-# ---------------------------------------------------------------- stations
-STATIONS = [
-    # code, city, zone_type, daily_capacity (packages/day), opened
-    ("BER-1", "Berlin",  "urban",    900, "2021-03-01"),
-    ("BER-4", "Berlin",  "urban",    700, "2022-06-15"),  # the constrained site
-    ("HAM-2", "Hamburg", "urban",    800, "2021-09-01"),
-    ("MUC-1", "Munich",  "suburban", 850, "2020-11-20"),
-    ("CGN-3", "Cologne", "suburban", 650, "2023-01-10"),
-    ("LEJ-1", "Leipzig", "rural",    500, "2023-08-01"),
+# category, item price band (min,max), n_core_suppliers, n_tail_suppliers, monthly PO-line volume
+CATS = [
+    ("IT Hardware",           (250, 2500), 3, 4,  55),
+    ("Software & SaaS",       (80, 1800),  3, 5,  60),
+    ("Facilities Services",   (500, 6000), 2, 6,  35),
+    ("Logistics Services",    (300, 4000), 3, 5,  50),
+    ("Marketing Services",    (400, 9000), 2, 18, 45),
+    ("Professional Services", (900, 12000),3, 8,  30),
+    ("Travel",                (120, 1600), 2, 4,  60),
+    ("Office Supplies",       (15, 400),   2, 14, 65),
+    ("MRO & Maintenance",     (40, 1500),  2, 16, 55),
+    ("Packaging",             (60, 900),   2, 5,  45),
 ]
 
-FAILURE_REASONS = ["customer_not_home", "access_problem", "address_issue",
-                   "package_damaged", "out_of_time"]
-
-FIRST = ["Anna", "Ben", "Clara", "David", "Elif", "Felix", "Gina", "Hakan",
-         "Ines", "Jonas", "Katja", "Lars", "Mara", "Nico", "Omar", "Paula",
-         "Quentin", "Rosa", "Stefan", "Tara", "Umut", "Vera", "Wim", "Yara", "Zoe"]
-LAST = ["Schmidt", "Yilmaz", "Weber", "Kowalski", "Nguyen", "Fischer", "Peters",
-        "Hoffmann", "Ali", "Novak", "Keller", "Braun", "Silva", "Wagner", "Krause"]
+ADJ = ["Nord", "Prime", "Delta", "Racoon", "Kiez", "Alpen", "Hanse", "Vertex",
+       "Quantum", "Linden", "Spree", "Falcon", "Orbit", "Baltic", "Cedar",
+       "Metro", "Atlas", "Nova", "Pixel", "Summit", "Core", "Bright", "Union",
+       "Rhein", "Isar", "Elbe", "Solid", "Clever", "Rapid", "Green"]
+NOUN = ["Solutions", "Services", "Group", "Systems", "Partners", "Consulting",
+        "Supply", "Tech", "Media", "Logistik", "Handel", "Works", "Facility",
+        "Trading", "Digital", "Industrie", "Office", "Concepts", "Agentur", "GmbH"]
+COUNTRIES = ["DE", "DE", "DE", "DE", "NL", "PL", "AT", "FR", "CZ", "GB"]
 
 
 def main():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB)
     cur = conn.cursor()
-    cur.executescript(open("../sql/00_schema.sql").read())
+    cur.executescript(open("00_schema.sql").read())
 
-    # ---- stations
-    for i, (code, city, zone, cap, opened) in enumerate(STATIONS, start=1):
-        cur.execute("INSERT INTO delivery_stations VALUES (?,?,?,?,?,?)",
-                    (i, code, city, zone, cap, opened))
+    for bu in BUS:
+        cur.execute("INSERT INTO business_units VALUES (?,?,?)", bu)
 
-    # ---- drivers (40-70 per station)
-    driver_id = 0
-    drivers_by_station = {}
-    for sid in range(1, len(STATIONS) + 1):
-        drivers_by_station[sid] = []
-        for _ in range(random.randint(40, 70)):
-            driver_id += 1
-            hired = date(2024, 1, 1) + timedelta(days=random.randint(0, 850))
-            name = f"{random.choice(FIRST)} {random.choice(LAST)}"
-            cur.execute("INSERT INTO drivers VALUES (?,?,?,?)",
-                        (driver_id, name, sid, hired.isoformat()))
-            drivers_by_station[sid].append((driver_id, hired))
+    used_names = set()
+    def new_supplier_name():
+        while True:
+            n = f"{random.choice(ADJ)} {random.choice(NOUN)}"
+            if n not in used_names:
+                used_names.add(n)
+                return n
 
-    # ---- routes, packages, attempts over a 12-week window
-    start = date(2026, 3, 30)          # Monday
-    weeks = 12
-    route_id = pkg_id = att_id = 0
+    sup_id = item_id = contract_id = 0
+    core_by_cat, tail_by_cat, items_by_cat, contracted_by_cat = {}, {}, {}, {}
 
-    for week in range(weeks):
-        growth = 1.02 ** week          # 2% WoW volume growth
-        for dow in range(6):           # Mon-Sat operations
-            d = start + timedelta(weeks=week, days=dow)
-            for sid, (code, city, zone, cap, _) in enumerate(STATIONS, start=1):
-                # demand grows; BER-4 demand runs hot vs its capacity
-                base = cap * (0.78 if code != "BER-4" else 0.97)
-                demand = int(base * growth * random.uniform(0.92, 1.08))
-                over_capacity = demand > cap
+    for cid, (cname, band, n_core, n_tail, _) in enumerate(CATS, start=1):
+        cur.execute("INSERT INTO categories VALUES (?,?)", (cid, cname))
 
-                n_routes = max(1, demand // 180)   # ~180 stops per route
-                for _ in range(n_routes):
-                    route_id += 1
-                    drv, hired = random.choice(drivers_by_station[sid])
-                    tenure_days = (d - hired).days
-                    rookie = 0 <= tenure_days < 90
+        core_by_cat[cid], tail_by_cat[cid] = [], []
+        for _ in range(n_core):
+            sup_id += 1
+            cur.execute("INSERT INTO suppliers VALUES (?,?,?)",
+                        (sup_id, new_supplier_name(), random.choice(COUNTRIES)))
+            core_by_cat[cid].append(sup_id)
+        for _ in range(n_tail):
+            sup_id += 1
+            cur.execute("INSERT INTO suppliers VALUES (?,?,?)",
+                        (sup_id, new_supplier_name(), random.choice(COUNTRIES)))
+            tail_by_cat[cid].append(sup_id)
 
-                    stops = random.randint(140, 210)
-                    # over-capacity sites cram more stops into routes
-                    if over_capacity:
-                        stops = int(stops * 1.15)
-                    planned_min = int(stops * random.uniform(2.3, 2.7))
-                    actual_min = int(planned_min *
-                                     random.uniform(1.02, 1.30 if over_capacity else 1.18))
-                    cur.execute("INSERT INTO routes VALUES (?,?,?,?,?,?,?)",
-                                (route_id, sid, drv, d.isoformat(),
-                                 stops, planned_min, actual_min))
+        # 10-14 catalogue items per category
+        items_by_cat[cid] = []
+        for i in range(random.randint(10, 14)):
+            item_id += 1
+            lp = round(random.uniform(*band), 2)
+            cur.execute("INSERT INTO items VALUES (?,?,?,?)",
+                        (item_id, f"{cname} item {i+1:02d}", cid, lp))
+            items_by_cat[cid].append((item_id, lp))
 
-                    # packages on this route (~1.15 pkgs per stop)
-                    for _ in range(int(stops * 1.15)):
-                        pkg_id += 1
-                        promised = d
-                        cur.execute(
-                            "INSERT INTO packages VALUES (?,?,?,?,?)",
-                            (pkg_id, route_id,
-                             f"{random.choice(['10','12','13','20','22','80','81','50','51','04'])}"
-                             f"{random.randint(100, 999)}",
-                             random.choice(["standard", "standard", "standard", "prime_same_day"]),
-                             promised.isoformat()))
+        # contracts: the top 1-2 core suppliers are contracted for the category
+        contracted_by_cat[cid] = core_by_cat[cid][:2]
+        for s in contracted_by_cat[cid]:
+            contract_id += 1
+            cur.execute("INSERT INTO contracts VALUES (?,?,?,?,?)",
+                        (contract_id, cid, s, "2024-07-01", "2026-12-31"))
 
-                        # ---- first attempt
-                        p_fail = 0.055
-                        if over_capacity: p_fail += 0.035
-                        if rookie:        p_fail += 0.030
-                        if zone == "urban" and dow < 5: p_fail += 0.015
-                        failed = random.random() < p_fail
+    # supplier price personality: each supplier prices the list price +/- a bias
+    price_bias = {}
+    def bias_for(s):
+        if s not in price_bias:
+            price_bias[s] = random.uniform(-0.06, 0.10)
+        return price_bias[s]
 
-                        att_id += 1
-                        t1 = datetime(d.year, d.month, d.day,
-                                      random.randint(9, 19), random.randint(0, 59))
-                        if not failed:
-                            cur.execute("INSERT INTO delivery_attempts VALUES (?,?,?,?,?,?)",
-                                        (att_id, pkg_id, 1, t1.isoformat(),
-                                         "delivered", None))
-                        else:
-                            if zone == "urban":
-                                reason = random.choices(FAILURE_REASONS,
-                                                        [45, 30, 10, 5, 10])[0]
-                            else:
-                                reason = random.choices(FAILURE_REASONS,
-                                                        [50, 10, 20, 5, 15])[0]
-                            cur.execute("INSERT INTO delivery_attempts VALUES (?,?,?,?,?,?)",
-                                        (att_id, pkg_id, 1, t1.isoformat(),
-                                         "failed", reason))
-                            # ---- second attempt next day, 90% succeed
-                            att_id += 1
-                            d2 = d + timedelta(days=1)
-                            t2 = datetime(d2.year, d2.month, d2.day,
-                                          random.randint(9, 19), random.randint(0, 59))
-                            ok2 = random.random() < 0.90
-                            cur.execute("INSERT INTO delivery_attempts VALUES (?,?,?,?,?,?)",
-                                        (att_id, pkg_id, 2, t2.isoformat(),
-                                         "delivered" if ok2 else "failed",
-                                         None if ok2 else random.choice(FAILURE_REASONS)))
+    # BU discipline: Operations South is the maverick-heavy BU
+    bu_maverick = {1: 0.06, 2: 0.10, 3: 0.22, 4: 0.12}
+
+    start = date(2024, 7, 1)
+    line_id = 0
+    po_seq = 1000
+
+    for m in range(24):                                   # 24 months
+        month_first = date(start.year + (start.month - 1 + m) // 12,
+                           (start.month - 1 + m) % 12 + 1, 1)
+        growth = 1.006 ** m                               # mild growth
+        q4 = 1.25 if month_first.month in (10, 11) else 1.0
+
+        for cid, (cname, band, n_core, n_tail, vol) in enumerate(CATS, start=1):
+            n_lines = int(vol * growth * q4 * random.uniform(0.85, 1.15))
+            for _ in range(n_lines):
+                line_id += 1
+                if line_id % 3 == 1:
+                    po_seq += 1
+                bu = random.choices([1, 2, 3, 4], [30, 25, 25, 20])[0]
+                d = month_first + timedelta(days=random.randint(0, 27))
+
+                maverick = random.random() < bu_maverick[bu]
+                if maverick and tail_by_cat[cid]:
+                    sup = random.choice(tail_by_cat[cid])
+                    premium = random.uniform(1.05, 1.16)  # off-contract costs more
+                else:
+                    # weight core suppliers unevenly -> Pareto concentration
+                    weights = [6, 3, 1][:len(core_by_cat[cid])]
+                    sup = random.choices(core_by_cat[cid], weights)[0]
+                    premium = 1.0
+
+                itm, lp = random.choice(items_by_cat[cid])
+                unit = round(lp * (1 + bias_for(sup)) * premium
+                             * random.uniform(0.98, 1.02), 2)
+                qty = max(1, int(random.expovariate(1 / 3)) + 1)
+
+                cur.execute("INSERT INTO po_lines VALUES (?,?,?,?,?,?,?,?,?)",
+                            (line_id, f"PO-{po_seq}", d.isoformat(),
+                             bu, sup, cid, itm, qty, unit))
 
     conn.commit()
-    for t in ["delivery_stations", "drivers", "routes", "packages", "delivery_attempts"]:
-        n = cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
-        print(f"{t:20s} {n:>9,} rows")
+    for t in ["business_units", "categories", "suppliers", "items",
+              "contracts", "po_lines"]:
+        print(f"{t:16s} {cur.execute(f'SELECT COUNT(*) FROM {t}').fetchone()[0]:>7,} rows")
+    total = cur.execute("SELECT ROUND(SUM(quantity*unit_price)/1e6,1) FROM po_lines").fetchone()[0]
+    print(f"total spend      EUR {total}m over 24 months")
     conn.close()
 
 
